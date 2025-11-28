@@ -11,6 +11,8 @@ import (
 const (
 	MinPrecision = 4
 	MaxPrecision = 18
+	two32        = 4_294_967_296.0              // 2^32
+	two64        = 18_446_744_073_709_551_616.0 // 2^64
 )
 
 type HLL struct {
@@ -54,33 +56,29 @@ func (h *HLL) Count() uint64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	sum := 0.0
 	m := float64(h.numberOfBuckets)
-	emptyRegisters := 0
+	sum := 0.0
+	empty := 0
 
-	for _, val := range h.registers {
-		// Calculate 2^(-val)
-		sum += math.Pow(2.0, -float64(val))
-		if val == 0 {
-			emptyRegisters++
+	for _, r := range h.registers {
+		sum += math.Pow(2, -float64(r))
+		if r == 0 {
+			empty++
 		}
 	}
 
 	alpha := h.getAlpha()
-	estimate := (alpha * m * m) / sum
+	estimate := alpha * m * m / sum
 
-	return h.applyCorrections(estimate, emptyRegisters)
-}
-
-func (h *HLL) applyCorrections(estimate float64, v int) uint64 {
-	m := float64(h.numberOfBuckets)
-
-	if estimate <= 2.5*m {
-		if v > 0 {
-			return uint64(m * math.Log(m/float64(v)))
-		}
+	if estimate <= 2.5*m && empty > 0 {
+		return uint64(m*math.Log(m/float64(empty)) + 0.5)
 	}
-	return uint64(estimate)
+
+	if estimate > two32/30 {
+		return uint64(-two64*math.Log(1-estimate/two64) + 0.5)
+	}
+
+	return uint64(estimate + 0.5)
 }
 
 func (h *HLL) getAlpha() float64 {
